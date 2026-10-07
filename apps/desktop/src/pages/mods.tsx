@@ -33,6 +33,7 @@ import { useTranslation } from "react-i18next";
 import { AlbumGrid, AlbumGridSkeleton } from "@/components/albums/album-grid";
 import ContentTypeTabs from "@/components/mod-browsing/content-type-tabs";
 import ModCard from "@/components/mod-browsing/mod-card";
+import { AuthorSearchResults } from "@/components/mod-browsing/author-search-results";
 import SearchBar from "@/components/mod-browsing/search-bar";
 import SearchBarSkeleton from "@/components/mod-browsing/search-bar-skeleton";
 import ErrorBoundary from "@/components/shared/error-boundary";
@@ -588,6 +589,10 @@ const GetModsData = ({
         onShowFavoritesOnlyChange={handleShowFavoritesOnlyChange}
         addedFilter={addedFilter}
         onAddedFilterChange={handleAddedFilterChange}
+      />
+      <AuthorSearchResults
+        collection={mapsOnly ? "maps" : "mods"}
+        query={deferredCatalogQuery}
       />
       {catalogPage.stale ? (
         <Alert variant='warning'>
