@@ -7,70 +7,51 @@ import {
 } from "@/lib/gamebanana-catalog";
 import { MODS_LIST_QUERY_KEY } from "@/lib/mods/mod-query-cache";
 import { STALE_TIME_API } from "@/lib/query-constants";
-import { type DeadlockSkinsAlbumMember, parseAlbumMembers } from "./parse";
+import type { z } from "zod";
+import {
+  AlbumDetailResponseSchema,
+  AlbumListResponseSchema,
+  type DeadlockSkinsAlbumMember,
+} from "./parse";
 
-// deadlockskins.gg has no public read API: its `/api/*` routes only serve
-// signed-in album editing. The album pages are server-rendered, and each one
-// carries its full member list as the JSON its own 1-click buttons use, so
-// the HTML is the interface.
 const DEADLOCKSKINS_ORIGIN = "https://deadlockskins.gg";
+const ALBUMS_API = `${DEADLOCKSKINS_ORIGIN}/api/public/v1/albums`;
 
 // Albums are hand-curated and change rarely.
 const ALBUMS_STALE_TIME = 60 * 60 * 1000;
 
-export type DeadlockSkinsAlbum = {
-  slug: string;
-  name: string;
-  description: string;
-  coverUrl: string | null;
-  itemCount: number;
+/** A deadlockskins.gg link to open in the browser, tagged so the site can attribute the visit. */
+export const deadlockSkinsLink = (path: string) => {
+  const url = new URL(path, DEADLOCKSKINS_ORIGIN);
+  url.searchParams.set("ref", "dmm-app");
+  return url.toString();
 };
 
-const albumPath = (slug: string) => `/albums/${encodeURIComponent(slug)}`;
-
-/** A deadlockskins.gg link to open in the browser, tagged so the site can attribute the visit. */
-export const deadlockSkinsLink = (path: string) =>
-  `${DEADLOCKSKINS_ORIGIN}${path}?ref=dmm`;
-
 export const albumPageUrl = (slug: string) =>
-  deadlockSkinsLink(albumPath(slug));
+  deadlockSkinsLink(`/albums/${encodeURIComponent(slug)}`);
 
-const fetchDocument = async (url: string): Promise<Document | null> => {
+/** The response body parsed by `schema`, or null on 404. */
+const fetchApi = async <T extends z.ZodType>(
+  url: string,
+  schema: T,
+): Promise<z.output<T> | null> => {
   const response = await fetch(url);
   if (response.status === 404) return null;
   if (!response.ok) {
     throw new Error(`deadlockskins.gg returned HTTP ${response.status}`);
   }
-  return new DOMParser().parseFromString(await response.text(), "text/html");
+  return schema.parse(await response.json());
 };
 
-const text = (root: ParentNode, selector: string) =>
-  root.querySelector(selector)?.textContent?.trim() ?? "";
+const getAlbums = async () =>
+  (await fetchApi(ALBUMS_API, AlbumListResponseSchema)) ?? [];
 
-const getAlbums = async (): Promise<DeadlockSkinsAlbum[]> => {
-  const doc = await fetchDocument(`${DEADLOCKSKINS_ORIGIN}/albums`);
-  return [
-    ...(doc?.querySelectorAll('a.album-poster[href^="/albums/"]') ?? []),
-  ].map((link) => ({
-    slug: link.getAttribute("href")?.slice("/albums/".length) ?? "",
-    name: text(link, ".name"),
-    description: text(link, ".theme"),
-    coverUrl: link.querySelector("img")?.getAttribute("src") ?? null,
-    itemCount: Number.parseInt(text(link, ".chip"), 10) || 0,
-  }));
-};
-
-/** The album's mods in album order, or null when deadlockskins.gg has no such album. */
-const getAlbumMembers = async (
-  slug: string,
-): Promise<DeadlockSkinsAlbumMember[] | null> => {
-  const doc = await fetchDocument(`${DEADLOCKSKINS_ORIGIN}${albumPath(slug)}`);
-  if (!doc) return null;
-  return parseAlbumMembers(
-    doc.querySelector("[data-album-install]")?.getAttribute("data-members") ??
-      "[]",
+/** The album with its mods in album order, or null when deadlockskins.gg has no such album. */
+const getAlbum = (slug: string) =>
+  fetchApi(
+    `${ALBUMS_API}/${encodeURIComponent(slug)}`,
+    AlbumDetailResponseSchema,
   );
-};
 
 export const deadlockSkinsAlbumsQueryOptions = () =>
   queryOptions({
@@ -80,10 +61,10 @@ export const deadlockSkinsAlbumsQueryOptions = () =>
     retry: 2,
   });
 
-export const deadlockSkinsAlbumMembersQueryOptions = (slug: string) =>
+export const deadlockSkinsAlbumQueryOptions = (slug: string) =>
   queryOptions({
     queryKey: ["deadlockskins", "album", slug],
-    queryFn: () => getAlbumMembers(slug),
+    queryFn: () => getAlbum(slug),
     staleTime: ALBUMS_STALE_TIME,
     retry: 2,
   });

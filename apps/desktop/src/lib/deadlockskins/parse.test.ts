@@ -1,52 +1,102 @@
 import { describe, expect, test } from "bun:test";
-import { parseAlbumMembers, parseDmmUrl } from "./parse";
+import { AlbumDetailResponseSchema, AlbumListResponseSchema } from "./parse";
 
-describe("deadlockskins album parsing", () => {
-  test("maps 1-click links to catalog slugs", () => {
-    expect(
-      parseDmmUrl(
-        "deadlock-mod-manager:https://gamebanana.com/mmdl/1804516,Mod,655808",
-      ),
-    ).toEqual({ remoteId: "655808", fileId: "1804516" });
-    expect(
-      parseDmmUrl(
-        "deadlock-mod-manager:https://gamebanana.com/mmdl/42,Sound,7",
-      ),
-    ).toEqual({ remoteId: "snd-7", fileId: "42" });
-  });
+const album = {
+  slug: "mann-co",
+  title: "Mann Co.",
+  description: "Team Fortress 2 mercs.",
+  itemCount: 3,
+  url: "https://deadlockskins.gg/albums/mann-co",
+  coverUrl: "https://assets.deadlockskins.gg/album-covers/abc.webp",
+  shareCardUrl: "https://assets.deadlockskins.gg/card/album-mann-co",
+};
 
-  test("rejects other hosts, item types, and schemes", () => {
-    expect(
-      parseDmmUrl("deadlock-mod-manager:https://evil.test/mmdl/1,Mod,2"),
-    ).toBeNull();
-    expect(
-      parseDmmUrl("deadlock-mod-manager:https://gamebanana.com/mmdl/1,Tool,2"),
-    ).toBeNull();
-    expect(
-      parseDmmUrl("grimoire:https://gamebanana.com/mmdl/1,Mod,2"),
-    ).toBeNull();
-  });
+const item = (type: string, id: number, installUrl: string | null = null) => ({
+  name: `${type} ${id}`,
+  nsfw: false,
+  url: `https://deadlockskins.gg/mods/${id}`,
+  gameBanana: { type, id },
+  installUrl,
+});
 
-  test("keeps album order and skips unsupported links", () => {
-    const json = JSON.stringify([
+describe("deadlockskins album API parsing", () => {
+  test("maps the album list onto the card shape", () => {
+    expect(
+      AlbumListResponseSchema.parse({ version: 1, albums: [album] }),
+    ).toEqual([
       {
-        name: "Pyro TF2 Infernus",
-        dmmUrl:
-          "deadlock-mod-manager:https://gamebanana.com/mmdl/1671980,Mod,655692",
-      },
-      {
-        name: "A tool",
-        dmmUrl: "deadlock-mod-manager:https://gamebanana.com/mmdl/1,Tool,2",
-      },
-      {
-        dmmUrl:
-          "deadlock-mod-manager:https://gamebanana.com/mmdl/1647796,Mod,616541",
+        slug: "mann-co",
+        name: "Mann Co.",
+        description: "Team Fortress 2 mercs.",
+        coverUrl: "https://assets.deadlockskins.gg/album-covers/abc.webp",
+        itemCount: 3,
       },
     ]);
+  });
 
-    expect(parseAlbumMembers(json)).toEqual([
-      { remoteId: "655692", fileId: "1671980" },
-      { remoteId: "616541", fileId: "1647796" },
+  test("maps items to catalog slugs with the curator's file", () => {
+    const { members } = AlbumDetailResponseSchema.parse({
+      version: 1,
+      album,
+      items: [
+        item(
+          "mod",
+          655808,
+          "deadlock-mod-manager:https://gamebanana.com/mmdl/1804516,Mod,655808",
+        ),
+        item(
+          "sound",
+          7,
+          "deadlock-mod-manager:https://gamebanana.com/mmdl/42,Sound,7",
+        ),
+      ],
+    });
+    expect(members).toEqual([
+      { remoteId: "655808", fileId: "1804516" },
+      { remoteId: "snd-7", fileId: "42" },
+    ]);
+  });
+
+  test("keeps items without a 1-click link, leaving the file unpicked", () => {
+    expect(
+      AlbumDetailResponseSchema.parse({
+        version: 1,
+        album,
+        items: [item("mod", 644152)],
+      }).members,
+    ).toEqual([{ remoteId: "644152" }]);
+  });
+
+  test("ignores 1-click links for another submission or host", () => {
+    const { members } = AlbumDetailResponseSchema.parse({
+      version: 1,
+      album,
+      items: [
+        item(
+          "mod",
+          2,
+          "deadlock-mod-manager:https://gamebanana.com/mmdl/1,Mod,3",
+        ),
+        item("mod", 5, "deadlock-mod-manager:https://evil.test/mmdl/4,Mod,5"),
+      ],
+    });
+    expect(members).toEqual([{ remoteId: "2" }, { remoteId: "5" }]);
+  });
+
+  test("keeps album order and skips unsupported items", () => {
+    const { members } = AlbumDetailResponseSchema.parse({
+      version: 1,
+      album,
+      items: [
+        item("mod", 655692),
+        item("tool", 2),
+        { name: "No GameBanana", gameBanana: null, installUrl: null },
+        item("mod", 616541),
+      ],
+    });
+    expect(members.map((member) => member.remoteId)).toEqual([
+      "655692",
+      "616541",
     ]);
   });
 });
